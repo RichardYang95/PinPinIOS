@@ -24,11 +24,18 @@ class ViewController: UIViewController, CLLocationManagerDelegate, GMSMapViewDel
     var addedMarker: GMSMarker? // Get from AddPinVC
     var tappedCoord: CLLocationCoordinate2D! // Pass to PinDetailVC
     
-    struct coordInfo {
+    struct coordInfo : Hashable {
         var coord = CLLocationCoordinate2D()
         var icon = UIImage()
+        var hashValue: Int
+        
+        static func ==(lhs: ViewController.coordInfo, rhs: ViewController.coordInfo) -> Bool {
+            return lhs.coord.latitude == rhs.coord.latitude && lhs.coord.longitude == rhs.coord.longitude
+        }
     }
-    var coords = [coordInfo]() // Array of coords from the firebase database
+    
+    //var coords = [coordInfo]() // Array of coords from the firebase database
+    var coords = Set<coordInfo>()
     
     @IBOutlet weak var searchButton: UIBarButtonItem!
     
@@ -76,24 +83,28 @@ class ViewController: UIViewController, CLLocationManagerDelegate, GMSMapViewDel
                     dbCoords.enumerateLines {line, _ in
                         lines.append(line)
                     }
-                    
-                    var ci = coordInfo()
-                    
+
                     for coord in lines {
                         if !coord.isEmpty {
                             let arr = coord.components(separatedBy: " ")
-                            ci.coord = CLLocationCoordinate2D(latitude: Double(arr[0])!, longitude: Double(arr[1])!)
+                            
+                            let coord = CLLocationCoordinate2D(latitude: Double(arr[0])!, longitude: Double(arr[1])!)
+                            var icon = UIImage(named: "food")!
                             switch(arr[2]) {
                             case "Money":
-                                ci.icon = UIImage(named: "money")!
+                                icon = UIImage(named: "money")!
                             case "Ride":
-                                ci.icon = UIImage(named: "ride")!
+                                icon = UIImage(named: "ride")!
                             case "FirstAid":
-                                ci.icon = UIImage(named: "firstaid")!
+                                icon = UIImage(named: "firstaid")!
                             default:
-                                ci.icon = UIImage(named: "food")!
+                                icon = UIImage(named: "food")!
                             }
-                            self.coords.append(ci)
+                            
+                            let ci = coordInfo(coord: coord, icon: icon, hashValue: 0)
+                            if (!self.coords.contains(ci)) {
+                                self.coords.insert(ci)
+                            }
                         }
                     }
                 }
@@ -110,12 +121,15 @@ class ViewController: UIViewController, CLLocationManagerDelegate, GMSMapViewDel
     func addPins() {
         // First delete all the current markers on the map
         self.mapView.clear()
-        
+
         for c in self.coords {
-            let marker = GMSMarker()
-            marker.position = c.coord
-            marker.map = mapView
-            marker.icon = c.icon
+            // Only show Pins within 20 km of user.
+            if 20 >= getDistance(lat1: (manager.location?.coordinate.latitude)!, lng1: (manager.location?.coordinate.longitude)!, lat2: c.coord.latitude, lng2: c.coord.longitude) {
+                let marker = GMSMarker()
+                marker.position = c.coord
+                marker.map = mapView
+                marker.icon = c.icon
+            }
         }
         
         self.coords.removeAll()
@@ -123,29 +137,30 @@ class ViewController: UIViewController, CLLocationManagerDelegate, GMSMapViewDel
     
     // Add pin to database when user taps an empty space
     func mapView(_ mapView: GMSMapView, didTapAt coord: CLLocationCoordinate2D) {
-        var ci = coordInfo()
-        ci.coord = coord
-        
         let alert = UIAlertController(title: "Pick a Need", message: nil, preferredStyle: UIAlertControllerStyle.actionSheet)
         alert.addAction(UIAlertAction(title: "Food", style: UIAlertActionStyle.default, handler: {(action) in
-            ci.icon = UIImage(named: "food")!
-            self.coords.append(ci)
+            let ci = coordInfo(coord: coord, icon: UIImage(named: "food")!, hashValue: 0)
+            //ci.icon = UIImage(named: "food")!
+            self.coords.insert(ci)
             self.addToDB(ci: ci, need: "Food")
             self.addPins()
         }))
         alert.addAction(UIAlertAction(title: "Money", style: UIAlertActionStyle.default, handler: {(action) in
-            ci.icon = UIImage(named: "money")!
-            self.coords.append(ci)
+            let ci = coordInfo(coord: coord, icon: UIImage(named: "money")!, hashValue: 0)
+            //ci.icon = UIImage(named: "money")!
+            self.coords.insert(ci)
             self.addToDB(ci: ci, need: "Money")
             self.addPins()}))
         alert.addAction(UIAlertAction(title: "First Aid", style: UIAlertActionStyle.default, handler: {(action) in
-            ci.icon = UIImage(named: "firstaid")!
-            self.coords.append(ci)
+            let ci = coordInfo(coord: coord, icon: UIImage(named: "firstaid")!, hashValue: 0)
+            //ci.icon = UIImage(named: "firstaid")!
+            self.coords.insert(ci)
             self.addToDB(ci: ci, need: "FirstAid")
             self.addPins()}))
         alert.addAction(UIAlertAction(title: "Ride", style: UIAlertActionStyle.default, handler: {(action) in
-            ci.icon = UIImage(named: "ride")!
-            self.coords.append(ci)
+            let ci = coordInfo(coord: coord, icon: UIImage(named: "ride")!, hashValue: 0)
+            //ci.icon = UIImage(named: "ride")!
+            self.coords.insert(ci)
             self.addToDB(ci: ci, need: "Ride")
             self.addPins()}))
         alert.addAction(UIAlertAction(title: "Cancel", style: UIAlertActionStyle.cancel, handler: nil))
@@ -157,7 +172,6 @@ class ViewController: UIViewController, CLLocationManagerDelegate, GMSMapViewDel
         let s = ("http://129.65.221.101/php/sendPinPinGPSdata.php?gps=" + String(ci.coord.latitude) + " " + String(ci.coord.longitude) + " " + need).addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
         let url = URL(string: s!)
         var request = URLRequest(url: url!)
-        //request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.httpMethod = "POST"
         let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
             if error != nil {
@@ -184,6 +198,66 @@ class ViewController: UIViewController, CLLocationManagerDelegate, GMSMapViewDel
         self.present(alert, animated: true, completion: nil)
         
         return true
+    }
+    
+    func mapView(_ mapView: GMSMapView, didLongPressAt coord: CLLocationCoordinate2D) {
+        let alert = UIAlertController(title: "Do you want to flag this Pin?",
+                                      message: "Flag this Pin if the person is not at the location anymore.",
+                                      preferredStyle: UIAlertControllerStyle.alert)
+        alert.addAction(UIAlertAction(title: "Confirm", style: UIAlertActionStyle.default, handler: {(action) in
+            // Can't get the marker's exact coords, so have to find the one nearest to the tap.
+            var shortestDist = Double.infinity
+            var temp = coordInfo(coord: CLLocationCoordinate2D(latitude: 0, longitude: 0),
+                                 icon: UIImage(named: "food")!,
+                                 hashValue: 0)
+            for pin in self.coords {
+                let distance = self.getDistance(lat1: pin.coord.latitude, lng1: pin.coord.longitude, lat2: coord.latitude, lng2: coord.longitude);
+
+                if distance < shortestDist {
+                    shortestDist = distance
+                    temp = pin
+                }
+            }
+            
+            print("TEMP : ", temp.coord.latitude, " ", temp.coord.longitude)
+            
+            // Remove the flagged marker from the map.
+            self.coords.remove(temp)
+            self.addPins()
+            
+            // Remove the flagged marker from the database.
+            let s = ("http://129.65.221.101/php/deleteFlaggedEntry?gps=" + String(temp.coord.latitude) + " " + String(temp.coord.longitude)).addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+            let url = URL(string: s!)
+            var request = URLRequest(url: url!)
+            request.httpMethod = "POST"
+            let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
+                if error != nil {
+                    print(error!)
+                }
+            }
+            task.resume()
+        }))
+        alert.addAction(UIAlertAction(title: "Cancel", style: UIAlertActionStyle.cancel, handler: nil))
+        self.present(alert, animated: true, completion: nil)
+    }
+    
+    func degreesToRadians(degrees: Double) -> Double{
+        return degrees * Double.pi / 180
+    }
+    
+    func getDistance(lat1: Double, lng1: Double, lat2: Double, lng2: Double) -> Double{
+        let earthRadiusKm = 6371.00;
+        
+        let dLat = degreesToRadians(degrees: lat2 - lat1)
+        let dLng = degreesToRadians(degrees: lng2 - lng1)
+        
+        let newLat1 = degreesToRadians(degrees: lat1)
+        let newLat2 = degreesToRadians(degrees: lat2)
+        
+        let a = sin(dLat / 2) * sin(dLat / 2) + sin(dLng / 2) * sin(dLng / 2) * cos(newLat1) * cos(newLat2)
+        let c = 2 * atan2(sqrt(a), sqrt(1 - a))
+        
+        return earthRadiusKm * c
     }
     
     //---------------------------------------------- Search Functionality -----------------------------------------------
@@ -221,5 +295,11 @@ class ViewController: UIViewController, CLLocationManagerDelegate, GMSMapViewDel
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
         // Dispose of any resources that can be recreated.
+    }
+}
+
+extension Double {
+    func roundTo(places:Int) -> String {
+        return String(format: "%.\(places)f", self)
     }
 }
