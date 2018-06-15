@@ -201,26 +201,28 @@ class ViewController: UIViewController, CLLocationManagerDelegate, GMSMapViewDel
     }
     
     func mapView(_ mapView: GMSMapView, didLongPressAt coord: CLLocationCoordinate2D) {
+        // Can't get the marker's exact coords, so have to find the one nearest to the tap.
+        var shortestDist = Double.infinity
+        var temp = coordInfo(coord: CLLocationCoordinate2D(latitude: 0, longitude: 0),
+                             icon: UIImage(named: "food")!,
+                             hashValue: 0)
+        for pin in self.coords {
+            let distance = self.getDistance(lat1: pin.coord.latitude, lng1: pin.coord.longitude, lat2: coord.latitude, lng2: coord.longitude);
+            
+            if distance < shortestDist {
+                shortestDist = distance
+                temp = pin
+            }
+        }
+        
+        if (shortestDist > 0.03) {
+            return;
+        }
+        
         let alert = UIAlertController(title: "Do you want to flag this Pin?",
                                       message: "Flag this Pin if the person is not at the location anymore.",
                                       preferredStyle: UIAlertControllerStyle.alert)
         alert.addAction(UIAlertAction(title: "Confirm", style: UIAlertActionStyle.default, handler: {(action) in
-            // Can't get the marker's exact coords, so have to find the one nearest to the tap.
-            var shortestDist = Double.infinity
-            var temp = coordInfo(coord: CLLocationCoordinate2D(latitude: 0, longitude: 0),
-                                 icon: UIImage(named: "food")!,
-                                 hashValue: 0)
-            for pin in self.coords {
-                let distance = self.getDistance(lat1: pin.coord.latitude, lng1: pin.coord.longitude, lat2: coord.latitude, lng2: coord.longitude);
-
-                if distance < shortestDist {
-                    shortestDist = distance
-                    temp = pin
-                }
-            }
-            
-            print("TEMP : ", temp.coord.latitude, " ", temp.coord.longitude)
-            
             // Remove the flagged marker from the map.
             self.coords.remove(temp)
             self.addPins()
